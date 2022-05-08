@@ -9,6 +9,56 @@ public record GraphicsControlExtension(
         int delayTime,
         int transparencyIndex) {
 
+    public Builder copy() {
+        return new Builder()
+                .setDisposalMethod(disposalMethod)
+                .setInputFlag(inputFlag)
+                .setTransparencyFlag(transparencyFlag)
+                .setDelayTime(delayTime)
+                .setTransparencyIndex(transparencyIndex);
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static final class Builder {
+        private byte disposalMethod;
+        private boolean inputFlag;
+        private boolean transparencyFlag;
+        private int delayTime;
+        private int transparencyIndex;
+        private Builder() {}
+        public Builder setDisposalMethod(byte method) {
+            this.disposalMethod = method;
+            return this;
+        }
+        public Builder setInputFlag(boolean flag) {
+            this.inputFlag = flag;
+            return this;
+        }
+        public Builder setTransparencyFlag(boolean flag) {
+            this.transparencyFlag = flag;
+            return this;
+        }
+        public Builder setDelayTime(int delay) {
+            this.delayTime = delay;
+            return this;
+        }
+        public Builder setTransparencyIndex(int index) {
+            this.transparencyIndex = index;
+            return this;
+        }
+        public GraphicsControlExtension build() {
+            return new GraphicsControlExtension(
+                    disposalMethod,
+                    inputFlag,
+                    transparencyFlag,
+                    delayTime,
+                    transparencyIndex);
+        }
+    }
+
     static GraphicsControlExtension decode(ByteStream source) throws IOException {
         if (source.nextByte() != 0x04) {
             throw new DataChannelException();

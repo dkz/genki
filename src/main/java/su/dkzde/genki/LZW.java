@@ -13,15 +13,16 @@ import java.util.Arrays;
 class LZW {
     private LZW() {}
 
-    private static final ThreadLocal<Decoder> decoder = ThreadLocal.withInitial(Decoder::new);
-    private static final ThreadLocal<Encoder> encoder = ThreadLocal.withInitial(Encoder::new);
-
-    static Decoder getDecoder() {
-        return decoder.get();
+    public static DataDecoder makeDecoder() {
+        return makeDecoder(1 << 18, 1 << 10);
     }
 
-    static Encoder getEncoder() {
-        return encoder.get();
+    public static DataDecoder makeDecoder(int bufferCap, int stackCap) {
+        return new Decoder(bufferCap, stackCap);
+    }
+
+    public static DataEncoder makeEncoder() {
+        return new Encoder();
     }
 
     /**
@@ -36,9 +37,14 @@ class LZW {
      *     decoder.close();
      * </pre>
      */
-    public static final class Decoder implements AutoCloseable {
-        private Decoder() {}
+    private static final class Decoder implements DataDecoder {
 
+        private Decoder(int bufferCap, int stackCap) {
+            o_buffer = new int[bufferCap];
+            backrefStack = new int[stackCap];
+        }
+
+        @Override
         public void initialize(int mcs) {
             p = c_null;
             o_ptr = 0;
@@ -50,7 +56,7 @@ class LZW {
         }
 
         @Override
-        public void close() {}
+        public void dispose() {}
 
         /**
          * {@code i_buffer} stores the reference to current input sub-block,
@@ -103,7 +109,7 @@ class LZW {
          * {@code o_buffer} is preemptively allocated array used to record output stream,
          * so that each decode call produces max one allocation caused by copying {@code o_buffer}.
          */
-        private final int[] o_buffer = new int[1 << 18];
+        private final int[] o_buffer;
         private int o_ptr = 0;
         private void write(int index) {
             o_buffer[o_ptr++] = index;
@@ -180,7 +186,7 @@ class LZW {
          * As no memory allocations is a must, this stack stores the sequence of codes
          * to be inspected and written to output buffer.
          */
-        private final int[] backrefStack = new int[1 << 10];
+        private final int[] backrefStack;
 
         /**
          * Build backref stack starting from the code {@code c}.
@@ -217,6 +223,7 @@ class LZW {
         }
 
         private int p = c_null;
+        @Override
         public int[] decode(byte[] block) {
             set(block);
             while (true) {
@@ -304,9 +311,10 @@ class LZW {
      *
      * </pre>
      */
-    public static final class Encoder implements AutoCloseable {
+    private static final class Encoder implements DataEncoder {
         private Encoder() {}
 
+        @Override
         public void initialize(int mcs) {
             eof_emitted = false;
             o_ptr = 0;
@@ -319,7 +327,7 @@ class LZW {
         }
 
         @Override
-        public void close() {}
+        public void dispose() {}
 
         private int o_ptr;
         private final byte[] o_buffer = new byte[255];
@@ -420,12 +428,15 @@ class LZW {
         private int i0_ptr;
         private int[] i_buffer;
         private int i_ptr;
+
+        @Override
         public void accept(int[] chunk) {
             i0_buffer = i_buffer;
             i0_ptr = i_ptr;
             i_buffer = chunk;
             i_ptr = 0;
         }
+
         /** Advance input pointer by {@code s} index entries. */
         private void advance(int s) {
             if (i0_buffer != null) {
@@ -521,6 +532,7 @@ class LZW {
          * While {@code eof} is false, it produces data blocks unless input buffer is exhausted,
          * after exhaustion returns {@code null}.
          * */
+        @Override
         public byte[] encode(boolean eof) {
 
             while (true) {

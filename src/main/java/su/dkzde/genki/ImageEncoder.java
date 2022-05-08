@@ -1,13 +1,17 @@
 package su.dkzde.genki;
 
+import java.util.function.Supplier;
+
 public final class ImageEncoder implements ImageVisitor {
 
     private final ProtoImageVisitor backend;
     private final ImageDescriptor id;
     private final LogicalScreenDescriptor lsd;
-    private LZW.Encoder encoder;
+    private final Supplier<DataEncoder> supplier;
+    private DataEncoder encoder;
 
     public ImageEncoder(
+            Supplier<DataEncoder> supplier,
             LogicalScreenDescriptor lsd,
             ImageDescriptor id,
             ProtoImageVisitor backend) {
@@ -15,6 +19,7 @@ public final class ImageEncoder implements ImageVisitor {
         this.backend = backend;
         this.id = id;
         this.lsd = lsd;
+        this.supplier = supplier;
     }
 
     @Override
@@ -30,7 +35,7 @@ public final class ImageEncoder implements ImageVisitor {
         } else {
             mcs = Math.max(2, 1 + lsd.colorTableSizeBits());
         }
-        encoder = LZW.getEncoder();
+        encoder = supplier.get();
         encoder.initialize(mcs);
         backend.visitDataStart(mcs);
     }
@@ -48,7 +53,7 @@ public final class ImageEncoder implements ImageVisitor {
         for (byte[] db = encoder.encode(true); db != null; db = encoder.encode(true)) {
             backend.visitDataBlock(db);
         }
-        encoder.close();
+        encoder.dispose();
         backend.visitEnd();
     }
 }

@@ -58,8 +58,8 @@ public class ProtoDecoderTest {
                     }
 
                     @Override public ProtoImageVisitor visitImage(ImageDescriptor descriptor) {
-                        ImageVisitor encoder = new ImageEncoder(lsd, descriptor, super.visitImage(descriptor));
-                        return new ImageDecoder(new ImageVisitorDecorator(encoder) {
+                        ImageVisitor encoder = new ImageEncoder(LZW::makeEncoder, lsd, descriptor, super.visitImage(descriptor));
+                        return new ImageDecoder(LZW::makeDecoder, new ImageVisitorDecorator(encoder) {
                             @Override public void visitData(int[] block) {
                                 Assertions.assertArrayEquals(block, index_data);
                                 super.visitData(block);
@@ -102,21 +102,30 @@ public class ProtoDecoderTest {
                         Assertions.assertEquals(0, descriptor.imageLeftPosition());
                         Assertions.assertEquals(0, descriptor.imageTopPosition());
                         Assertions.assertFalse(descriptor.localColorTableUsed());
+                        ImageDecoder decoder = new ImageDecoder(LZW::makeDecoder, new ImageVisitor() {
+                            @Override public void visitColorTable(int index, byte r, byte g, byte b) {}
+                            @Override public void visitDataStart() {}
+                            @Override public void visitData(int[] block) {
+                                Assertions.assertArrayEquals(block, index_data);
+                            }
+                            @Override public void visitDataEnd() {}
+                        });
                         return new ProtoImageVisitorDecorator(super.visitImage(descriptor)) {
-                            LZW.Decoder decoder;
+                            @Override public void visitColorTable(int index, byte r, byte g, byte b) {
+                                decoder.visitColorTable(index, r, g, b);
+                                super.visitColorTable(index, r, g, b);
+                            }
                             @Override public void visitDataStart(int lzwCodeSize) {
+                                decoder.visitDataStart(lzwCodeSize);
                                 super.visitDataStart(lzwCodeSize);
-                                decoder = LZW.getDecoder();
-                                decoder.initialize(lzwCodeSize);
                             }
                             @Override public void visitDataBlock(byte[] block) {
+                                decoder.visitDataBlock(block);
                                 super.visitDataBlock(block);
-                                int[] indexes = decoder.decode(block);
-                                Assertions.assertArrayEquals(indexes, index_data);
                             }
                             @Override public void visitEnd() {
+                                decoder.visitEnd();
                                 super.visitEnd();
-                                decoder.close();
                             }
                         };
                     }

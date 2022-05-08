@@ -1,12 +1,16 @@
 package su.dkzde.genki;
 
+import java.util.function.Supplier;
+
 public final class ImageDecoder implements ProtoImageVisitor {
 
     private final ImageVisitor backend;
-    private LZW.Decoder decoder;
+    private final Supplier<DataDecoder> supplier;
+    private DataDecoder decoder;
 
-    public ImageDecoder(ImageVisitor visitor) {
+    public ImageDecoder(Supplier<DataDecoder> supplier, ImageVisitor visitor) {
         this.backend = visitor;
+        this.supplier = supplier;
     }
 
     @Override
@@ -16,7 +20,7 @@ public final class ImageDecoder implements ProtoImageVisitor {
 
     @Override
     public void visitDataStart(int lzwCodeSize) {
-        decoder = LZW.getDecoder();
+        decoder = supplier.get();
         decoder.initialize(lzwCodeSize);
         backend.visitDataStart();
     }
@@ -28,7 +32,7 @@ public final class ImageDecoder implements ProtoImageVisitor {
 
     @Override
     public void visitEnd() {
-        decoder.close();
+        decoder.dispose();
         backend.visitDataEnd();
     }
 }
