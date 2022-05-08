@@ -1,5 +1,6 @@
 package su.dkzde.genki;
 
+import javax.annotation.Nullable;
 import java.io.IOException;
 
 public class ProtoEncoder implements AutoCloseable, ProtoVisitor {
@@ -27,6 +28,36 @@ public class ProtoEncoder implements AutoCloseable, ProtoVisitor {
             throw new ProtoEncoderException(exception);
         }
     }
+
+    @Override
+    public @Nullable ProtoApplicationVisitor visitApplication(ApplicationDescriptor descriptor) {
+        try {
+            backend.nextUnsignedByte(0x21);
+            backend.nextUnsignedByte(0xff);
+            ApplicationDescriptor.encode(descriptor, backend);
+            return applicationEncoder;
+        } catch (IOException exception) {
+            throw new ProtoEncoderException(exception);
+        }
+    }
+
+    private final ProtoApplicationVisitor applicationEncoder = new ProtoApplicationVisitor() {
+        @Override public void visitDataBlock(byte[] block) {
+            try {
+                backend.nextUnsignedByte(block.length);
+                backend.nextByteSequence(block);
+            } catch (IOException exception) {
+                throw new ProtoEncoderException(exception);
+            }
+        }
+        @Override public void visitEnd() {
+            try {
+                backend.nextUnsignedByte(0x00);
+            } catch (IOException exception) {
+                throw new ProtoEncoderException(exception);
+            }
+        }
+    };
 
     @Override
     public void visitLogicalScreenDescriptor(LogicalScreenDescriptor descriptor) {

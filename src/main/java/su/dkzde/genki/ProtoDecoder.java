@@ -20,9 +20,9 @@ public final class ProtoDecoder implements AutoCloseable {
         source.init();
         byte[] header = source.nextByteSequence(new byte[6]);
         switch (new String(header)) {
-            case "GIF87a" -> { visitor.visitHeader(Version.gif87a); }
-            case "GIF89a" -> { visitor.visitHeader(Version.gif89a); }
-            default -> { throw new DataChannelException(); }
+            case "GIF87a" -> visitor.visitHeader(Version.gif87a);
+            case "GIF89a" -> visitor.visitHeader(Version.gif89a);
+            default -> throw new DataChannelException();
         }
         LogicalScreenDescriptor lsd = LogicalScreenDescriptor.decode(source);
         visitor.visitLogicalScreenDescriptor(lsd);
@@ -39,13 +39,10 @@ public final class ProtoDecoder implements AutoCloseable {
                 // Extensions:
                 case 0x21 -> {
                     switch (source.nextUnsignedByte()) {
-                        case 0xf9 -> {
-                            visitor.visitGraphicsControlExtension(GraphicsControlExtension.decode(source));
-                        }
+                        case 0xf9 -> visitor.visitGraphicsControlExtension(GraphicsControlExtension.decode(source));
                         // Plain text extension and application extension, skip it:
-                        case 0x01, 0xff -> {
-                            skipExtensionBlock();
-                        }
+                        case 0x01 -> skipExtensionBlock();
+                        case 0xff -> readApplicationExtension(visitor.visitApplication(ApplicationDescriptor.decode(source)));
                         // Comment extension, skip it:
                         case 0xfe -> {
                             int bs = source.nextUnsignedByte();
@@ -79,6 +76,20 @@ public final class ProtoDecoder implements AutoCloseable {
         while (bs > 0) {
             source.nextByteSequence(new byte[bs]);
             bs = source.nextUnsignedByte();
+        }
+    }
+
+    private void readApplicationExtension(@Nullable ProtoApplicationVisitor visitor) throws IOException {
+        int bs = source.nextUnsignedByte();
+        while (bs > 0) {
+            byte[] block = source.nextByteSequence(new byte[bs]);
+            if (visitor != null) {
+                visitor.visitDataBlock(block);
+            }
+            bs = source.nextUnsignedByte();
+        }
+        if (visitor != null) {
+            visitor.visitEnd();
         }
     }
 

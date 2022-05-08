@@ -16,6 +16,11 @@ public abstract class ProtoVisitorDecorator implements ProtoVisitor {
     }
 
     @Override
+    public @Nullable ProtoApplicationVisitor visitApplication(ApplicationDescriptor descriptor) {
+        return downstream.visitApplication(descriptor);
+    }
+
+    @Override
     public void visitLogicalScreenDescriptor(LogicalScreenDescriptor descriptor) {
         downstream.visitLogicalScreenDescriptor(descriptor);
     }

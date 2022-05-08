@@ -1,22 +1,51 @@
 package su.dkzde.genki;
 
-import java.util.*;
+import javax.annotation.Nullable;
+import java.util.Arrays;
 
-public class LZW {
+/**
+ * LZW encoder and decoder implementations.
+ *
+ * Concrete classes are too low-level to be accessed directly, hence it has package-level privacy set.
+ * On top of that, the implementation of encoding and decoding algorithms are too fragile, since underlying
+ * code is assuming it is used in a specified way, with a specific combination of calls.
+ */
+class LZW {
     private LZW() {}
 
     private static final ThreadLocal<Decoder> decoder = ThreadLocal.withInitial(Decoder::new);
+    private static final ThreadLocal<Encoder> encoder = ThreadLocal.withInitial(Encoder::new);
 
-    public static Decoder getDecoder() {
+    static Decoder getDecoder() {
         return decoder.get();
     }
 
+    static Encoder getEncoder() {
+        return encoder.get();
+    }
+
+    /**
+     * Decodes a data block into an array of indices. Usage:
+     * <pre>
+     *     LZW.Decoder decoder = LZW.getDecoder();
+     *     decoder.initialize(lzwMinimalCodeSize);
+     *     while (moreInput) {
+     *         int[] chunk = decoder.decode(block);
+     *         process(chunk);
+     *     }
+     *     decoder.close();
+     * </pre>
+     */
     public static final class Decoder implements AutoCloseable {
         private Decoder() {}
 
         public void initialize(int mcs) {
             p = c_null;
             o_ptr = 0;
+            i1_buffer = null;
+            i1_ptr = 0;
+            i_buffer = null;
+            i_ptr = 0;
             initDictionary(mcs);
         }
 
@@ -74,7 +103,7 @@ public class LZW {
          * {@code o_buffer} is preemptively allocated array used to record output stream,
          * so that each decode call produces max one allocation caused by copying {@code o_buffer}.
          */
-        private final int[] o_buffer = new int[1 << 15];
+        private final int[] o_buffer = new int[1 << 18];
         private int o_ptr = 0;
         private void write(int index) {
             o_buffer[o_ptr++] = index;
@@ -140,7 +169,9 @@ public class LZW {
             if (t_ptr < 4096) {
                 table[2 * t_ptr] = backref;
                 table[2 * t_ptr + 1] = code;
-                if (++t_ptr >= (1 << ccs)) ccs++;
+                if (++t_ptr >= (1 << ccs)) {
+                    if (ccs < 12) ccs++;
+                }
             }
         }
 
@@ -149,7 +180,7 @@ public class LZW {
          * As no memory allocations is a must, this stack stores the sequence of codes
          * to be inspected and written to output buffer.
          */
-        private final int[] backrefStack = new int[1 << 8];
+        private final int[] backrefStack = new int[1 << 10];
 
         /**
          * Build backref stack starting from the code {@code c}.
@@ -247,5 +278,336 @@ public class LZW {
             rcb -= bs;
         }
         return c;
+    }
+
+    /**
+     * Encodes an index stream into LZW-compressed data sub-blocks. Usage:
+     * <pre>
+     *
+     *     LZW.Encoder encoder = LZW.getEncoder();
+     *     encoder.initialize(lzwMinimalCodeSize);
+     *
+     *     // While input is still available feed to encoder and call .encode until it eventually asks for more input
+     *     // by returning a null:
+     *     for (int[] block : blocks) {
+     *         encoder.accept(block);
+     *         for (byte[] db = encoder.encode(false); db != null; db = encoder.encode(false)) {
+     *             processDataBlock(db);
+     *         }
+     *     }
+     *
+     *     // Signal to encoder that there is no more input by supplying true and consume the remaining data blocks:
+     *     for (byte[] db = encoder.encode(true); db != null; db = encoder.encode(true)) {
+     *         processDataBlock(db);
+     *     }
+     *     encoder.close();
+     *
+     * </pre>
+     */
+    public static final class Encoder implements AutoCloseable {
+        private Encoder() {}
+
+        public void initialize(int mcs) {
+            eof_emitted = false;
+            o_ptr = 0;
+            ov_ptr = 0;
+            i0_buffer = null;
+            i0_ptr = 0;
+            i_buffer = null;
+            i_ptr = 0;
+            initDictionary(mcs);
+        }
+
+        @Override
+        public void close() {}
+
+        private int o_ptr;
+        private final byte[] o_buffer = new byte[255];
+        private int ov_ptr = 0;
+        private final byte[] ov_buffer = new byte[16];
+        private boolean eof_emitted;
+        /**
+         * @return whether block is completed and should be emitted by a call to the encoder,
+         * in case codes cannot be written to the output buffer, write them to the overflow
+         * buffer to copy it back later.
+         */
+        private boolean write(int c) {
+
+            int remain = 8 * o_buffer.length - o_ptr;
+            if (remain <= 0) {
+                insertCode(c, ccs, ov_ptr, ov_buffer);
+                ov_ptr += ccs;
+                return true;
+            } else if (ov_ptr > 0) {
+                System.arraycopy(ov_buffer, 0, o_buffer, 0, ov_buffer.length);
+                insertCode(c, ccs, ov_ptr, o_buffer);
+                o_ptr = ov_ptr + ccs;
+                ov_ptr = 0;
+                return false;
+            }
+
+            if (remain > ccs) {
+                insertCode(c, ccs, o_ptr, o_buffer);
+                o_ptr += ccs;
+                return false;
+            } else if (remain < ccs) {
+                insertCode(c, remain, o_ptr, o_buffer);
+                int rc = c >> remain;
+                int rcs = ccs - remain;
+                insertCode(rc, rcs, ov_ptr, ov_buffer);
+                ov_ptr += rcs;
+                o_ptr += remain;
+                return true;
+            } else {
+                insertCode(c, ccs, o_ptr, o_buffer);
+                o_ptr += ccs;
+                return true;
+            }
+        }
+        private byte[] output() {
+            int cb = o_ptr/8;
+            int rb = o_ptr%8;
+            if (rb > 0) {
+                rb = 8 - rb;
+            }
+            if (eof_emitted) {
+                if (o_ptr > 0) {
+                    if (cb < o_buffer.length) {
+                        if (rb > 0) {
+                            insertCode(0, rb, o_ptr, o_buffer);
+                            o_ptr = 0;
+                            return Arrays.copyOfRange(o_buffer, 0, 1 + cb);
+                        } else {
+                            o_ptr = 0;
+                            return Arrays.copyOfRange(o_buffer, 0, cb);
+                        }
+                    } else {
+                        o_ptr = 0;
+                        return o_buffer;
+                    }
+                } else if (ov_ptr > 0) {
+                    int ocb = ov_ptr/8;
+                    int orb = ov_ptr%8;
+                    if (orb > 0) {
+                        orb = 8 - orb;
+                    }
+                    if (orb > 0) {
+                        insertCode(0, ocb, ov_ptr, o_buffer);
+                    }
+                    ov_ptr = 0;
+                    return Arrays.copyOfRange(ov_buffer, 0, 1 + ocb);
+                } else {
+                    return null;
+                }
+            } else {
+                if (cb < o_buffer.length) {
+                    if (rb > 0) {
+                        insertCode(0, rb, o_ptr, o_buffer);
+                        o_ptr = 0;
+                        return Arrays.copyOfRange(o_buffer, 0, 1 + cb);
+                    } else {
+                        o_ptr = 0;
+                        return Arrays.copyOfRange(o_buffer, 0, cb);
+                    }
+                } else {
+                    o_ptr = 0;
+                    return o_buffer;
+                }
+            }
+        }
+
+        private @Nullable int[] i0_buffer = null;
+        private int i0_ptr;
+        private int[] i_buffer;
+        private int i_ptr;
+        public void accept(int[] chunk) {
+            i0_buffer = i_buffer;
+            i0_ptr = i_ptr;
+            i_buffer = chunk;
+            i_ptr = 0;
+        }
+        /** Advance input pointer by {@code s} index entries. */
+        private void advance(int s) {
+            if (i0_buffer != null) {
+                int remain = i0_buffer.length - i0_ptr;
+                if (s < remain) {
+                    i0_ptr += s;
+                    return;
+                } else {
+                    s -= remain;
+                    i0_buffer = null;
+                }
+            }
+            i_ptr += s;
+        }
+        /** Return index that is {@code i} indexes ahead of current pointer position, or {@code -1} if buffer is too short */
+        private int lookup(int i) {
+            if (i0_buffer != null) {
+                if (i0_ptr + i < i0_buffer.length) {
+                    return i0_buffer[i0_ptr + i];
+                } else {
+                    i -= i0_buffer.length - i0_ptr;
+                }
+            }
+            if (i_ptr + i < i_buffer.length) {
+                return i_buffer[i_ptr + i];
+            } else {
+                return -1;
+            }
+        }
+
+        private static final int c_literal = -1;
+        private static final int c_null = -2;
+
+        private int its;
+        private int mcs;
+        private int ccs;
+        private final int[] table = new int[3 * 4096];
+        private int t_ptr = 0;
+        private int c_clear;
+        private int c_eof;
+        private void initDictionary(int mcs) {
+            this.mcs = mcs;
+            this.ccs = 1 + mcs;
+            this.its = 1 << mcs;
+            for (int j = 0; j < its; j++) {
+                table[3 * j] = c_literal;
+                table[3 * j + 1] = j;
+                table[3 * j + 2] = 0;
+            }
+            c_clear = its;
+            c_eof = 1 + its;
+            t_ptr = 2 + its;
+            Arrays.fill(table, 3 * (its + 2), table.length, c_null);
+            write(c_clear);
+        }
+        private boolean clearDictionary() {
+            boolean yield = write(c_clear);
+            ccs = 1 + mcs;
+            t_ptr = 2 + its;
+            Arrays.fill(table, 3 * (its + 2), table.length, c_null);
+            return yield;
+        }
+        /** @return either previous element of the sequence or {@code c_literal} if entry is a part of initial table */
+        private int lookupEntry(int e) {
+            return table[3 * e];
+        }
+        /** @return output code of current entry element */
+        private int lookupCode(int e) {
+            return table[3 * e + 1];
+        }
+        /** @return lookup length of the current entry element */
+        private int lookupLength(int e) {
+            return table[3 * e + 2];
+        }
+        private int lookupSequenceLength(int e) {
+            return 1 + table[3 * e + 2];
+        }
+        private boolean append(int c, int k) {
+            if (t_ptr < 4096) {
+                table[3 * t_ptr] = c;
+                table[3 * t_ptr + 1] = k;
+                table[3 * t_ptr + 2] = 1 + table[3 * c + 2];
+                if (t_ptr++ >= (1 << ccs)) {
+                    if (ccs < 12) ccs++;
+                }
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        /**
+         * While {@code eof} is false, it produces data blocks unless input buffer is exhausted,
+         * after exhaustion returns {@code null}.
+         * */
+        public byte[] encode(boolean eof) {
+
+            while (true) {
+
+                if (lookup(0) < 0) {
+                    if (eof) {
+                        if (!eof_emitted) {
+                            write(c_eof);
+                            eof_emitted = true;
+                        }
+                        return output();
+                    } else {
+                        return null;
+                    }
+                }
+
+                // Lookup longest prefix:
+                int lp = c_null;
+                lookup:
+                for (int j = t_ptr - 1; j > c_eof; j--) {
+                    int e = j;
+                    while (true) {
+                        int el = lookupEntry(e);
+                        int ec = lookupCode(e);
+                        int en = lookupLength(e);
+                        int ci = lookup(en);
+                        if (ci < 0) {
+                            if (eof) {
+                                continue lookup;
+                            } else {
+                                return null;
+                            }
+                        }
+                        if (lookup(en) == ec) {
+                            if (el == c_literal) {
+                                lp = j;
+                                break lookup;
+                            } else {
+                                e = el;
+                            }
+                        } else {
+                            continue lookup;
+                        }
+                    }
+                }
+
+                if (lp == c_null) {
+                    lp = lookup(0);
+                }
+
+                int k = lookup(1 + lookupLength(lp));
+                if (k < 0) {
+                    if (!eof) {
+                        return null;
+                    }
+                }
+                advance(lookupSequenceLength(lp));
+
+                boolean yieldBlock = write(lp);
+
+                if (k >= 0) {
+                    if (!append(lp, k)) {
+                        yieldBlock |= clearDictionary();
+                    }
+                } else {
+                    write(c_eof);
+                    eof_emitted = true;
+                    return output();
+                }
+
+                if (yieldBlock) {
+                    return output();
+                }
+            }
+        }
+    }
+
+    private static void insertCode(int c, int ccs, int ptr, byte[] block) {
+        while (ccs > 0) {
+            int bi = ptr/8;
+            int cbp = ptr%8;
+            int rb = Math.min(8 - cbp, ccs);
+            int bs = c & ((1 << rb) - 1);
+            block[bi] = (byte) ((block[bi] & ((1 << cbp) - 1)) | (bs << cbp));
+            c = c >> rb;
+            ccs -= rb;
+            ptr += rb;
+        }
     }
 }
