@@ -8,11 +8,11 @@ public interface DataDecoder {
 
     void dispose();
 
-    static DataDecoder makeLZW() {
+    static DataDecoder makeDecoder() {
         return LZW.makeDecoder();
     }
 
-    static DataDecoder makeLZW(int bufferCap, int stackCap) {
+    static DataDecoder makeDecoder(int bufferCap, int stackCap) {
         return LZW.makeDecoder(bufferCap, stackCap);
     }
 
