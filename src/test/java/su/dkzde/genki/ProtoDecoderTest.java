@@ -3,6 +3,7 @@ package su.dkzde.genki;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
 public class ProtoDecoderTest {
@@ -46,9 +47,9 @@ public class ProtoDecoderTest {
     };
 
     @Test void fullCycleEncoding() throws IOException {
-        ByteArrays.ByteSinkImpl output = ByteArrays.channel();
-        new ProtoDecoder(ByteArrays.asByteStream(input))
-                .accept(new ProtoVisitorDecorator(new ProtoEncoder(output)) {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        new ProtoDecoder(ByteStream.from(input))
+                .accept(new ProtoVisitorDecorator(new ProtoEncoder(ByteSink.from(bos))) {
 
                     private LogicalScreenDescriptor lsd;
 
@@ -67,14 +68,14 @@ public class ProtoDecoderTest {
                         });
                     }
                 });
-        Assertions.assertArrayEquals(input, output.array());
+        Assertions.assertArrayEquals(input, bos.toByteArray());
     }
 
     @Test void sampleDecoder() throws IOException {
 
-        ByteArrays.ByteSinkImpl output = ByteArrays.channel();
-        new ProtoDecoder(ByteArrays.asByteStream(input))
-                .accept(new ProtoVisitorDecorator(new ProtoEncoder(output)) {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        new ProtoDecoder(ByteStream.from(input))
+                .accept(new ProtoVisitorDecorator(new ProtoEncoder(ByteSink.from(bos))) {
                     @Override public void visitHeader(Version version) {
                         super.visitHeader(version);
                         Assertions.assertEquals(Version.gif89a, version);
@@ -131,6 +132,6 @@ public class ProtoDecoderTest {
                     }
                 });
 
-        Assertions.assertArrayEquals(input, output.array());
+        Assertions.assertArrayEquals(input, bos.toByteArray());
     }
 }
