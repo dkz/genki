@@ -9,4 +9,8 @@ public interface DataEncoder {
     byte[] encode(boolean eof);
 
     void dispose();
+
+    static DataEncoder makeEncoder() {
+        return LZW.makeEncoder();
+    }
 }
