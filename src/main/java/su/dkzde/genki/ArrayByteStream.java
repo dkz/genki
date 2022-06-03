@@ -39,6 +39,6 @@ public class ArrayByteStream implements ByteStream {
 
     @Override
     public int nextUnsignedShort() throws DataChannelException {
-        return nextUnsignedByte() | nextUnsignedByte() << 2;
+        return nextUnsignedByte() | nextUnsignedByte() << 8;
     }
 }

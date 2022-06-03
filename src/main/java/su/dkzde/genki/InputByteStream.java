@@ -41,6 +41,6 @@ public class InputByteStream implements ByteStream {
 
     @Override
     public int nextUnsignedShort() throws IOException, DataChannelException {
-        return nextUnsignedByte() | nextUnsignedByte() << 2;
+        return nextUnsignedByte() | nextUnsignedByte() << 8;
     }
 }
